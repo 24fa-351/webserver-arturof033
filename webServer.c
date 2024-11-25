@@ -1,5 +1,6 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <netdb.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/socket.h>
@@ -13,87 +14,60 @@
 #define LISTEN_BACKLOG 5
 #define BUFFER_SIZE 1024
 
-int respond_to_http_client_message(int sock_fd, http_client_message_t* http_msg, server_info** http_info){
-
-    if(strncmp(http_msg->method, "/static", 7) == 0){
-
-        char* response = "we received a static message\n";
-        (*http_info)->bytes_sent = strlen(response);
-        write(sock_fd, response, strlen(response));
-        (*http_info)->bytes_sent = strlen(response);
-
-    }
-    else if(strncmp(http_msg->method, "/stats", 6) == 0){
-
-        char response[MAX_RESPONSE_SIZE];
-        snprintf(response, MAX_RESPONSE_SIZE, "Requests: %d\nBytes Recieved: %d\nBytes Sent: %d\n\n", 
-                (*http_info)->requests, 
-                (*http_info)->bytes_received, 
-                (*http_info)->bytes_sent);
-        (*http_info)->bytes_sent = strlen(response);
-        write(sock_fd, response, strlen(response));
-        write(sock_fd, SEPARATOR, SEPARATOR_LENGTH);
-        
-    }
-    else if(strncmp(http_msg->method, "/calc", 5) == 0){
-
-        int a;
-        int b;
-        char response[MAX_RESPONSE_SIZE];
-        sscanf(http_msg->method, "/calc/%d/%d", &a, &b);
-        snprintf(response, MAX_RESPONSE_SIZE, "the sum of %d and %d is %d\n\n", a, b, a+b);
-        write(sock_fd, response, sizeof(response)); 
-        write(sock_fd, SEPARATOR, SEPARATOR_LENGTH);
-        (*http_info)->bytes_sent = strlen(response);
-        
-    }
-    else{
-        write(sock_fd, ERROR_MESSAGE, strlen(ERROR_MESSAGE));
-    }
-
-    return 0;
-}
-
 // incoming param was malloced elsewhere; is freed here
-void* handleConnection(void* a_client_ptr){
+void* handleConnection(void* client_fd_ptr){
 
-    int a_client = *(int*)a_client_ptr;
-    free(a_client_ptr);
+    int client_fd = *(int*)client_fd_ptr;
+    free(client_fd_ptr);
 
     server_info *http_info = malloc(sizeof(server_info));
-    http_info->requests = 0;
-    http_info->bytes_received = 0;
-    http_info->bytes_sent = 0;
+    initialize_http_info(&http_info);
 
-    write(a_client, SEPARATOR, SEPARATOR_LENGTH);
+    write(client_fd, SEPARATOR, SEPARATOR_LENGTH);
 
     while (1){
+
         http_client_message_t* http_msg;
         http_read_result_t result;
-        read_http_client_message(a_client, &http_msg, &result, &http_info);
+
+        read_http_client_message(client_fd, &http_msg, &result, &http_info);
+
+        //write_http_client_message(client_fd, http_msg, result, &http_info);
 
         if(result == BAD_REQUEST){
 
            printf("Bad request\n");
-            close(a_client);
+            close(client_fd);
             return 0;
 
         }
         else if(result == CLOSED_CONNECTION){
 
             printf("Closed connection\n");
-            close(a_client);
+            close(client_fd);
             return 0;
 
         }
         else if(result == INVALID_COMMAND){
 
-            write(a_client, ERROR_MESSAGE, strlen(ERROR_MESSAGE));
-            write(a_client, SEPARATOR, SEPARATOR_LENGTH);
+            write(client_fd, ERROR_MESSAGE, strlen(ERROR_MESSAGE));
+            write(client_fd, SEPARATOR, SEPARATOR_LENGTH);
         }
         else{
 
-            respond_to_http_client_message(a_client, http_msg, &http_info);
+            
+
+            //char* response = get_response_to_http_client_message(http_msg, http_info);
+            http_msg->body = strdup(get_response_to_http_client_message(http_msg, http_info));
+
+            fill_http_client_message(&http_msg, &http_info);
+
+            print_http_client_message(client_fd, http_msg);
+
+            //write(client_fd, http_msg->body, strlen(http_msg->body));
+
+            //free(response);
+            
             http_client_message_free(http_msg);
 
         }
@@ -159,3 +133,5 @@ int main(int argc, char* argv[]){
     return 0;
 
 }
+
+
